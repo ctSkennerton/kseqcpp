@@ -34,34 +34,16 @@
 #ifndef AC_KSEQ_H
   #define AC_KSEQ_H
 
+#define HAVE_ZLIB  1
+#define HAVE_BZIP2 1
+
 #include <ctype.h>
-#include <cstring>
+#include <string>
 #include <cstdlib>
-#include <zlib.h>
 #include <unistd.h>
 
-class kstring 
-{
-public:
-    kstring();
-    ~kstring();
-    size_t l;
-    size_t m;
-    char *s;
-};
-
-class kseq
-{
-public:
-    kseq();
-    ~kseq();
-    kstring name;
-    kstring comment;
-    kstring seq;
-    kstring qual;
-    int last_char;
-};
-
+#if HAVE_ZLIB
+#include <zlib.h>
 class FunctorZlib 
 {
 public:
@@ -70,6 +52,20 @@ public:
         return gzread(file, buffer, len);
     }
 };
+#endif
+
+
+#if HAVE_BZIP2
+#include <bzlib.h>
+class FunctorBZlib2
+{
+public:
+    int operator()(BZFILE* file, void * buffer, int len) 
+    {
+        return BZ2_bzread(file, buffer, len );
+    }
+};
+#endif
 
 class FunctorRead
 {
@@ -79,6 +75,19 @@ public:
         return read(fd, buf, count);
     }
 };
+
+class kseq
+{
+public:
+    kseq();
+    ~kseq();
+    std::string name;
+    std::string comment;
+    std::string seq;
+    std::string qual;
+    int last_char;
+};
+
 
 template<class ret_t, class ReadFunction>
 class kstream
@@ -109,50 +118,40 @@ public:
                 return -1;
             seq.last_char = c;
         }
-        seq.comment.l = seq.seq.l = seq.qual.l = 0;
-        if (this->getuntil(0, &seq.name, &c) < 0)
+        seq.comment.clear();
+        seq.seq.clear();
+        seq.qual.clear();
+
+        if (this->getuntil(0, seq.name, &c) < 0)
             return -1;
         if (c != '\n')
-            this->getuntil( '\n', &seq.comment, 0);
+            this->getuntil( '\n', seq.comment, 0);
         while ((c = this->getc()) != -1 && c != '>' && c != '+' && c != '@')
         {
             if (isgraph(c))
             {
-                if (seq.seq.l + 1 >= seq.seq.m)
-                {
-                    seq.seq.m = seq.seq.l + 2;
-                    (--(seq.seq.m), (seq.seq.m)|=(seq.seq.m)>>1, (seq.seq.m)|=(seq.seq.m)>>2, (seq.seq.m)|=(seq.seq.m)>>4, (seq.seq.m)|=(seq.seq.m)>>8, (seq.seq.m)|=(seq.seq.m)>>16, ++(seq.seq.m));
-                    seq.seq.s = (char*)realloc(seq.seq.s, seq.seq.m);
-                } 
-                seq.seq.s[seq.seq.l++] = (char)c;
-            } 
+                seq.seq += (char)c;
+            }
         }
         if (c == '>' || c == '@')
             seq.last_char = c;
-        seq.seq.s[seq.seq.l] = 0;
-        
-        if (c != '+') 
-            return (int)seq.seq.l;
-        
-        if (seq.qual.m < seq.seq.m)
-        {
-            seq.qual.m = seq.seq.m;
-            seq.qual.s = (char*)realloc(seq.qual.s, seq.qual.m);
-        }
-         
+
+        if (c != '+')
+            return (int)seq.seq.length();
+
+
         while ((c = this->getc()) != -1 && c != '\n');
-         
+
         if (c == -1)
             return -2;
-        while ((c = this->getc()) != -1 && seq.qual.l < seq.seq.l) {
+        while ((c = this->getc()) != -1 && seq.qual.length() < seq.seq.length()) {
             if (c >= 33 && c <= 127)
-                seq.qual.s[seq.qual.l++] = (unsigned char)c;
+                seq.qual += (char)c;
         }
-        seq.qual.s[seq.qual.l] = 0;
         seq.last_char = 0;
-        if (seq.seq.l != seq.qual.l)
+        if (seq.seq.length() != seq.qual.length())
             return -2;
-        return (int)seq.seq.l;
+        return (int)seq.seq.length();
     }
 
 private:
@@ -172,12 +171,14 @@ private:
         return (int)this->buf[this->begin++];
     }
 
-    int getuntil(int delimiter, kstring *str, int *dret)
+    int getuntil(int delimiter, std::string &str, int *dret)
     {
         if (dret)
             *dret = 0;
-        str->l = 0;
-        
+        if (!str.empty()) {
+            str.clear();
+        }
+
         if (this->begin >= this->end && this->is_eof)
             return -1;
         for (;;)
@@ -221,15 +222,8 @@ private:
                 }
             }
             else i = 0;
-            
-            if ((int)(str->m - str->l) < i - this->begin + 1)
-            {
-                str->m = str->l + (i - this->begin) + 1;
-                (--(str->m), (str->m)|=(str->m)>>1, (str->m)|=(str->m)>>2, (str->m)|=(str->m)>>4, (str->m)|=(str->m)>>8, (str->m)|=(str->m)>>16, ++(str->m));
-                str->s = (char*)realloc(str->s, str->m);
-            }
-            memcpy(str->s + str->l, this->buf + this->begin, i - this->begin);
-            str->l = str->l + (i - this->begin);
+
+            str.append(this->buf + this->begin, i - this->begin);
             this->begin = i + 1;
             if (i < this->end)
             {
@@ -238,13 +232,7 @@ private:
                 break;
             }
         }
-        if (str->l == 0)
-        {
-            str->m = 1;
-            str->s = (char*)calloc(1, 1);
-        }
-        str->s[str->l] = '\0';
-        return (int)str->l;
+        return (int)str.length();
     }
 
     char *buf;
@@ -255,20 +243,6 @@ private:
     ReadFunction readfunc;
 };
 
-
-kstring::kstring() 
-{
-    this->l = 0;
-    this->m = 0;
-    this->s = NULL;
-}
-
-kstring::~kstring()
-{
-    free(this->s);
-    this->m = 0;
-    this->l = 0;
-}
 
 kseq::kseq()
 {
