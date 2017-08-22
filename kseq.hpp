@@ -244,12 +244,12 @@ private:
 };
 
 
-kseq::kseq()
+inline kseq::kseq()
 {
     this->last_char = 0;
 }
 
-kseq::~kseq()
+inline kseq::~kseq()
 {} 
 
 #endif
