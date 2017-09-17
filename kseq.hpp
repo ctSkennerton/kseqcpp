@@ -32,12 +32,9 @@
 /*Converted into template classes by CTS 11DEC2014*/
 
 #ifndef AC_KSEQ_H
-  #define AC_KSEQ_H
+#define AC_KSEQ_H
 
-#define HAVE_ZLIB  1
-#define HAVE_BZIP2 1
-
-#include <ctype.h>
+#include <cctype>
 #include <string>
 #include <cstdlib>
 #include <unistd.h>
@@ -47,7 +44,7 @@
 class FunctorZlib 
 {
 public:
-    int operator()(gzFile file, void * buffer, int len) 
+    int operator()(gzFile file, void * buffer, unsigned int len)
     {
         return gzread(file, buffer, len);
     }
@@ -70,7 +67,7 @@ public:
 class FunctorRead
 {
 public:
-    size_t operator()(int fd, void *buf, size_t count)
+    ssize_t operator()(int fd, void *buf, size_t count)
     {
         return read(fd, buf, count);
     }
@@ -79,8 +76,8 @@ public:
 class kseq
 {
 public:
-    kseq();
-    ~kseq();
+    kseq() : last_char(0) {};
+    ~kseq() = default;;
     std::string name;
     std::string comment;
     std::string seq;
@@ -93,14 +90,8 @@ template<class ret_t, class ReadFunction>
 class kstream
 {
 public:
-    kstream(ret_t f, ReadFunction rf)
-    {
-        this->f = f;
-        this->buf = (char*)malloc(4096);
-        this->is_eof = 0;
-        this->begin = 0;
-        this->end = 0;
-        this->readfunc = rf;
+    kstream(ret_t f, ReadFunction rf) : bufferSize(4096), f(f), is_eof(0), begin(0), end(0), readfunc(rf) {
+        buf = (char*) malloc(bufferSize);
     }
 
     ~kstream()
@@ -162,8 +153,8 @@ private:
         if (this->begin >= this->end)
         {
             this->begin = 0;
-            this->end = this->readfunc(this->f, this->buf, 4096);
-            if (this->end < 4096)
+            this->end = this->readfunc(this->f, this->buf, bufferSize);
+            if (this->end < bufferSize)
                 this->is_eof = 1;
             if (this->end == 0)
                 return -1;
@@ -189,8 +180,8 @@ private:
                 if (!this->is_eof)
                 {
                     this->begin = 0;
-                    this->end = this->readfunc(this->f, this->buf, 4096);
-                    if (this->end < 4096)
+                    this->end = this->readfunc(this->f, this->buf, bufferSize);
+                    if (this->end < bufferSize)
                         this->is_eof = 1;
                     if (this->end == 0)
                         break;
@@ -223,7 +214,7 @@ private:
             }
             else i = 0;
 
-            str.append(this->buf + this->begin, i - this->begin);
+            str.append(this->buf + this->begin, static_cast<unsigned long>(i - this->begin));
             this->begin = i + 1;
             if (i < this->end)
             {
@@ -241,15 +232,7 @@ private:
     int is_eof;
     ret_t f;
     ReadFunction readfunc;
+    const unsigned int bufferSize;
 };
-
-
-inline kseq::kseq()
-{
-    this->last_char = 0;
-}
-
-inline kseq::~kseq()
-{} 
 
 #endif
